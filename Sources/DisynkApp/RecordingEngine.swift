@@ -86,8 +86,6 @@ final class RecordingEngine: @unchecked Sendable {
         let needsSeparate = mode == .separateFiles || mode == .both
         let needsMerge = mode == .composedOnly || mode == .both
 
-        }
-
         var layout: ComposeLayout?
         if needsMerge {
             guard let l = params.layout, l.placements.count >= 2 else {
