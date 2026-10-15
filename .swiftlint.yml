@@ -1,0 +1,34 @@
+# SwiftLint 配置（方案第五节工程结构项）
+# 说明：当前损坏的 CLT 环境下无法运行 swiftlint；配置文件随工程交付，
+# 待 Xcode/CLT 修复后在 CI 或 pre-commit 中启用 `swiftlint`。
+
+opt_in_rules:
+  - empty_count
+  - closure_spacing
+  - force_unwrapping
+  - implicit_return
+  - explicitly_init
+  - private_over_fileprivate
+
+disabled_rules:
+  - todo                       # 源码内的 TODO 注释不报警
+  - type_name                  # DK* 模块类型命名带前缀，长度放宽
+
+excluded:
+  - .build
+  - Scripts
+
+line_length:
+  warning: 140
+  ignores_urls: true
+  ignores_comments: true
+
+file_length:
+  warning: 600
+  error: 1000
+
+identifier_name:
+  min_length:
+    warning: 2                 # fps、pts 等短名在音视频代码中常见
+  max_length:
+    warning: 60

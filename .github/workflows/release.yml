@@ -1,0 +1,193 @@
+name: Release
+
+# 标签变动即自动构建 DMG 并发布到 GitHub Releases。
+# 移动已有标签会重跑并覆盖同名产物（gh release upload --clobber）。
+# 产物为 arm64、ad-hoc 签名不公证（package.sh 路径 A）；配 Developer ID 见文末说明。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号（留空则取 Info.plist 的 CFBundleShortVersionString）"
+        required: false
+        default: ""
+      with_libvpx:
+        description: "编译 libvpx 以带上 WebM / VP8·VP9 导出"
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # gh release create/upload 需要写权限；上一版写成 read，构建全过但发布那步 403
+  contents: write
+  # 构建失败时把首条编译错误写成 commit status（公开可读，无需日志权限即可定位）
+  statuses: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      # build.sh / package.sh 认的是 "1"，workflow_dispatch 的布尔输入在这里映射
+      DISYNK_WITH_LIBVPX: ${{ github.event.inputs.with_libvpx == 'false' && '0' || '1' }}
+      # 通用二进制：arm64 + Intel（x86_64）。构建机是 arm64 runner，x86_64 靠 SDK 交叉编译
+      DISYNK_ARCHS: arm64 x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 工具链自检
+        run: |
+          sw_vers
+          echo "➤ xcode-select: $(xcode-select -p)"
+          swiftc --version
+          xcrun --sdk macosx --show-sdk-version
+          uname -m
+
+      - name: 解析版本号
+        id: ver
+        run: |
+          set -e
+          raw="${{ github.event.inputs.version }}"
+          if [[ -z "$raw" && "${{ github.ref_type }}" == "tag" ]]; then
+            raw="${GITHUB_REF_NAME}"
+          fi
+          if [[ -z "$raw" ]]; then
+            raw="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - Resources/Info.plist)"
+          fi
+          version="${raw#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "➤ 本次发布：版本 $version / 标签 v$version / libvpx=$DISYNK_WITH_LIBVPX"
+
+      - name: 构建 libvpx（WebM VP8/VP9）
+        if: env.DISYNK_WITH_LIBVPX == '1'
+        timeout-minutes: 25
+        run: zsh Scripts/build_libvpx.sh
+
+      - name: 用例自检（非阻断）
+        # CI 无屏幕录制/辅助功能授权，采集类断言在 runner 上必然失败；
+        # 这里只取编译期与纯逻辑信号，失败不作为发布阻断条件。
+        # 步骤级超时：headless 会话里等权限的用例可能挂住，不能让它吃掉整个发布窗口。
+        continue-on-error: true
+        timeout-minutes: 10
+        run: zsh Scripts/test.sh
+
+      - name: 打包 DMG
+        env:
+          DISYNK_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eo pipefail
+          mkdir -p .build
+          zsh Scripts/package.sh 2>&1 | tee .build/package.log
+          ls -la .build/dist
+
+      - name: 失败时把编译错误写成 commit status
+        # Actions 日志要 admin 权限才能取；commit status 是公开可读的，失败原因写这里才能被远程定位
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ERR="$(grep -m1 -E 'error:' .build/package.log 2>/dev/null | cut -c1-120 || true)"
+          DESC="${ERR:-构建失败（未匹配到 error: 行，见作业日志）}"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"             -f state=failure -f context=disynk/build -f description="$DESC" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "➤ 已写入 commit status：$DESC"
+
+      - name: 校验架构切片与签名
+        run: |
+          set -e
+          BIN=.build/dist/Disynk.app/Contents/MacOS/Disynk
+          echo "➤ 可执行切片：$(lipo -archs "$BIN")"
+          for a in $DISYNK_ARCHS; do
+            lipo -archs "$BIN" | tr ' ' '\n' | grep -qx "$a" || { echo "✗ 产物缺 $a 切片"; exit 1; }
+          done
+          if [[ -e .build/dist/Disynk.app/Contents/Frameworks/libvpx.11.dylib ]]; then
+            echo "➤ libvpx 切片：$(lipo -archs .build/dist/Disynk.app/Contents/Frameworks/libvpx.11.dylib)"
+          else
+            echo "ℹ 产物内无 libvpx dylib（DISYNK_WITH_LIBVPX=$DISYNK_WITH_LIBVPX），WebM 导出不可用"
+          fi
+          codesign --verify --deep --strict --verbose=2 .build/dist/Disynk.app
+          spctl --assess --type execute .build/dist/Disynk.app 2>&1 || \
+            echo "ℹ Gatekeeper 评估未通过属预期（ad-hoc 签名、未公证），安装需 xattr -cr"
+
+      - name: 生成发布说明
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.version }}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          {
+            echo "macOS 多屏录制 · 截图 · 本地 OCR（通用二进制 arm64 + x86_64 / macOS 15+）"
+            echo
+            echo "### 安装 / Install"
+            echo "1. 下载 \`Disynk-$VERSION.dmg\`，把 Disynk.app 拖入「应用程序」"
+            echo "2. 首次运行被 Gatekeeper 拦截时执行 \`xattr -cr /Applications/Disynk.app\`，"
+            echo "   或在「系统设置 → 隐私与安全性」点「仍要允许」"
+            echo "3. ad-hoc 签名每次重编译 cdhash 变化：升级后需重新勾选屏幕录制权限"
+            echo
+            echo "WebM/VP8·VP9：${{ env.DISYNK_WITH_LIBVPX == '1' && '已装配（libvpx 由 CI 从上游源码编译）' || '本构建未装配' }}"
+            echo
+            echo "### 变更 / Changes"
+            PREV="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+            if [[ -n "$PREV" ]]; then
+              git log --no-merges --pretty=format:'- %s' "$PREV..$TAG"
+            else
+              git log -30 --no-merges --pretty=format:'- %s'
+            fi
+            echo
+            echo "### 构建 Build"
+            echo "- commit \`${GITHUB_SHA}\`"
+            echo "- runner macos-15 (arm64) · 架构切片 \`$DISYNK_ARCHS\`（x86_64 为 SDK 交叉编译）"
+            echo "- 触发 \`${{ github.ref_type }}\` \`${GITHUB_REF_NAME}\`"
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: 上传到 GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="${{ steps.ver.outputs.tag }}"
+          DMG="$(ls .build/dist/*.dmg | head -1)"
+          echo "➤ 产物：$DMG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file release-notes.md
+            gh release upload "$TAG" "$DMG" --clobber
+          else
+            gh release create "$TAG" \
+              --title "Disynk $TAG" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA" \
+              "$DMG"
+          fi
+          # BSD-3-Clause：随分发保留 libvpx 许可原文（命名区分于仓库根的专有 LICENSE）
+          if [[ -e Scripts/vendor/libvpx/LICENSE ]]; then
+            cp Scripts/vendor/libvpx/LICENSE "$RUNNER_TEMP/LICENSE-libvpx.txt"
+            gh release upload "$TAG" "$RUNNER_TEMP/LICENSE-libvpx.txt" --clobber
+          fi
+          gh release view "$TAG"
+
+      - name: 保留构建产物（供人工核对）
+        uses: actions/upload-artifact@v4
+        with:
+          name: Disynk-${{ steps.ver.outputs.version }}-macos-arm64
+          path: |
+            .build/dist/*.dmg
+            Scripts/vendor/libvpx/LICENSE
+          if-no-files-found: warn
+          retention-days: 30
+
+# Developer ID + 公证（package.sh 路径 B）：把上面「打包 DMG」步骤加上
+#   DISYNK_SIGN_IDENTITY: ${{ secrets.DISYNK_SIGN_IDENTITY }}
+#   DISYNK_NOTARY_PROFILE: disynk
+# 并用 secrets 里的证书建钥匙串（见 docs/ARCHITECTURE.md 第五节）。
+# 注意 --timestamp 需要联网到 Apple，且 hardened runtime 用 Disynk.hardened.entitlements。

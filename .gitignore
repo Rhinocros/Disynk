@@ -1,0 +1,107 @@
+### macOS
+# Finder metadata
+.DS_Store
+
+# Thumbnails
+._*
+
+# Custom folder icons
+Icon
+
+
+# Volume root files
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+### Objective-C
+# Xcode user settings
+xcuserdata/
+
+# Xcode build data
+DerivedData/
+mcache/
+
+# Obj-C/Swift specific
+*.hmap
+
+# App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+### Python
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# dotenv environment variable files
+.env
+
+# Virtual environments
+.venv
+env/
+venv/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.pytest_cache/
+
+# Type checkers
+.mypy_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+# .python-version
+
+### Swift
+# Xcode user settings
+xcuserdata/
+
+# Xcode build data
+DerivedData/
+
+# Swift/Obj-C specific
+*.hmap
+
+# App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+# Package.resolved
+
+# swiftc 直编产物（build.sh/package.sh 输出，勿入库）
+.build/
+
+# vendored 第三方二进制（体积大且可按 vendor/README 重建，不入 git；保留头文件/modulemap/README）
+Scripts/vendor/**/*.dylib

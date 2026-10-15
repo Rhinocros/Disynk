@@ -1,0 +1,4 @@
+module LibVPX {
+    header "libvpx_shim.h"
+    export *
+}

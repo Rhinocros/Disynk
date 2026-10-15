@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none"><title>Disynk monochrome</title>
+<defs><clipPath id="dsmc"><path d="M88 128 H424 L480 184 V328 L424 384 H88 L32 328 V184 Z"/></clipPath><mask id="dsmm"><rect x="0" y="0" width="512" height="512" fill="#fff"/><path d="M118 206 H182 L200 224 V288 L182 306 H118 L100 288 V224 Z" fill="#000"/><path d="M330 206 H394 L412 224 V288 L394 306 H330 L312 288 V224 Z" fill="#000"/></mask></defs><g clip-path="url(#dsmc)" mask="url(#dsmm)"><g transform="rotate(-16 256 256)"><rect x="-500" y="-500" width="740.0" height="1600" fill="currentColor"/><rect x="272.0" y="-500" width="900" height="1600" fill="currentColor"/></g></g>
+</svg>
